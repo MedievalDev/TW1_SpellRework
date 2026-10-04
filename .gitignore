@@ -9,3 +9,5 @@ ref/*
 art/
 __pycache__/
 *.pyc
+# local notes
+mods_vor_test.txt

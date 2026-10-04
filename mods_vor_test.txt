@@ -1,1 +1,0 @@
-EnemyLevels.wd=1 TW1_Probe.wd=1 Yamalin.wd=0

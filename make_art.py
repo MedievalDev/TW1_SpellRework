@@ -12,11 +12,12 @@ corner ornaments are kept: a pixel inside the picture area that is equal
 on the Lightning and the Push Wave card (same frame, other picture) and
 not dark belongs to the frame. Everything else gets the new picture.
 
-Tornado effect: Particles\Magic\POISONCLOUD_MISSILE.prt (Graphics.wd)
-recoloured to pale storm blue - particle colour = curve pairs 6-8 (curves
-12-17), light colour = emitter curves 22-27, layout from
-wicked/tw1probe/research/prtparse.py and spell_vfx.md - with its ground
-symbol swapped for the SWIRL_4 vortex.
+Tornado effect: the desert sand devil Particles\Enviroment\Desert\SANDDEVIL2.prt
+(Graphics.wd; a spinning column that widens upwards, picked and checked in
+the SDK's ParticleEdit) recoloured to pale storm blue - particle colour =
+curve pairs 6-8 (curves 12-17), light colour = emitter curves 22-27, layout
+from wicked/tw1probe/research/prtparse.py and spell_vfx.md. Curves AND the
+baked per-tick tables behind them are changed (the game reads the tables).
 """
 import io
 import os
@@ -39,13 +40,10 @@ SEP = chr(92)
 # picture area (x0, y0, x1, y1) inside the frame, measured on the originals
 CARD_RECT = (8, 12, 120, 214)
 ICON_RECT = (5, 5, 91, 107)
-MISSILE_TEMPLATE = SEP.join(['Particles', 'Magic', 'POISONCLOUD_MISSILE.prt'])
+MISSILE_TEMPLATE = SEP.join(['Particles', 'Enviroment', 'Desert', 'SANDDEVIL2.prt'])
 TORNADO_TINT = (0.72, 0.84, 1.0)    # pale storm blue, times the layer's old brightness
 TORNADO_LIGHT = (0.45, 0.6, 1.0)
-SYMBOL_OLD = SEP.join(['Textures', 'Particles', 'Symbols', 'Azirraal_symbol01.dds'])
-# same length as the old path, so nothing in the .prt moves; a copy of SWIRL_4.DDS
-SYMBOL_NEW = SEP.join(['Textures', 'Particles', 'Symbols', 'SR_TORNADO_SWIRL4.dds'])
-SWIRL_SRC = SEP.join(['Textures', 'Particles', 'Symbols', 'SWIRL_4.DDS'])
+TORNADO_GAIN = 1.0
 CARD_TEX_OLD = SEP.join(['Textures', 'Particles', 'Cards', 'AIR_LIGHTING.DDS'])
 CARD_TEX_NEW = SEP.join(['Textures', 'Particles', 'Cards', 'AIR_TORNADO1.DDS'])
 ARCHIVES = ('Update16.wd', 'Update11-15.wd', 'Graphics.wd')
@@ -180,17 +178,56 @@ def scale_curve(d, off, factor):
         struct.pack_into('<f', d, o, min(1.0, struct.unpack_from('<f', d, o)[0] * factor))
 
 
+def table_offsets(d, start, count):
+    """Baked per-tick tables after the curves (the game reads these, ParticleEdit's preview the curves):
+    per curve u32 n, u32 0, n x f32 samples, u8 isConst, f32 const. Returns (samples_off, n, isconst_off)."""
+    out = []
+    o = start
+    for _ in range(count):
+        n, zero = struct.unpack_from('<II', d, o)
+        assert zero == 0 and n < 100000, (o, n, zero)
+        out.append((o + 8, n, o + 8 + 4 * n))
+        o += 8 + 4 * n + 5
+    return out
+
+
+def set_table(d, tab, value):
+    s, n, c = tab
+    for k in range(n):
+        struct.pack_into('<f', d, s + 4 * k, value)
+    if d[c]:
+        struct.pack_into('<f', d, c + 1, value)
+
+
+def scale_table(d, tab, factor):
+    s, n, c = tab
+    for k in range(n):
+        struct.pack_into('<f', d, s + 4 * k, min(1.0, struct.unpack_from('<f', d, s + 4 * k)[0] * factor))
+    if d[c]:
+        struct.pack_into('<f', d, c + 1, min(1.0, struct.unpack_from('<f', d, c + 1)[0] * factor))
+
+
+def table_values(d, tab):
+    s, n, c = tab
+    vals = list(struct.unpack_from('<%df' % n, d, s))
+    if d[c]:
+        vals.append(struct.unpack_from('<f', d, c + 1)[0])
+    return vals
+
+
 def recolour_prt(src, tint, gain, light, alpha_gain=1.0):
     """Every textured, coloured layer gets tint x its old brightness x gain; lights get light.
 
-    Only key values of the colour curves (particle curves 12-17), the alpha
-    curves (18-19) and the light colour curves (emitter 22-27) change, so the
-    file keeps its size and layout. Pure white layers (distortion rings,
-    sparks) stay as they are.
+    Changes the colour curves (particle curves 12-17), the alpha curves
+    (18-19) and the light colour curves (emitter 22-27) AND their baked
+    tables in the block tail, so curves and tables agree. The file keeps its
+    size and layout. Pure white layers (distortion rings, sparks) stay as
+    they are.
     """
     r = prtparse.parse(src)
     post = 152 if src[3] == 2 else 148
     d = bytearray(src)
+    checks = []
     for q in r['particles']:
         if not q.textures:
             continue
@@ -200,34 +237,41 @@ def recolour_prt(src, tint, gain, light, alpha_gain=1.0):
         p = prtparse.particle_head(src, q.offset)[8]
         offs = curve_offsets(src, p + 200, 28)
         assert prtparse.curves(src, p + 200, 28)[1] == q.curves_end, q.name
+        tabs = table_offsets(src, q.curves_end, 28)
         lum = 0.3 * first[0] + 0.59 * first[1] + 0.11 * first[2]
         for c in range(3):
             v = min(1.0, lum * gain * tint[c])
-            set_curve(d, offs[12 + 2 * c], v)
-            set_curve(d, offs[13 + 2 * c], v)
+            for i in (12 + 2 * c, 13 + 2 * c):
+                set_curve(d, offs[i], v)
+                set_table(d, tabs[i], v)
+                checks.append((tabs[i], v))
         if alpha_gain != 1.0:
-            scale_curve(d, offs[18], alpha_gain)
-            scale_curve(d, offs[19], alpha_gain)
+            for i in (18, 19):
+                scale_curve(d, offs[i], alpha_gain)
+                scale_table(d, tabs[i], alpha_gain)
     for e in r['emitters']:
         if all(abs(e.curves[22 + i][0][1] - 1.0) < 1e-6 for i in range(6)):
             continue                     # white = the default, no own light
         cs = prtparse.emitter_head(src, e.offset, post)[3]
         offs = curve_offsets(src, cs, 44)
         assert prtparse.curves(src, cs, 44)[1] == e.curves_end, e.name
+        tabs = table_offsets(src, e.curves_end, 44)
         for c in range(3):
-            set_curve(d, offs[22 + 2 * c], light[c])
-            set_curve(d, offs[23 + 2 * c], light[c])
+            for i in (22 + 2 * c, 23 + 2 * c):
+                set_curve(d, offs[i], light[c])
+                set_table(d, tabs[i], light[c])
+                checks.append((tabs[i], light[c]))
     out = bytes(d)
+    for tab, v in checks:
+        assert all(abs(x - v) < 1e-6 for x in table_values(out, tab)), (tab, v)
     chk = prtparse.parse(out)
     assert len(out) == len(src) and len(chk['particles']) == len(r['particles']) and chk['end'] == r['end']
     return out
 
 
 def tornado_prt(src):
-    """Poison Cloud as a storm: pale blue layers at their old brightness, blue light, vortex symbol."""
-    out = swap_texture_path(recolour_prt(src, TORNADO_TINT, 1.25, TORNADO_LIGHT), SYMBOL_OLD, SYMBOL_NEW)
-    assert len(out) == len(src)
-    return out
+    """The sand devil as a storm: pale blue layers at their old brightness (the dark debris stays dark)."""
+    return recolour_prt(src, TORNADO_TINT, TORNADO_GAIN, TORNADO_LIGHT)
 
 
 def art_from(inner, name, fn):
@@ -252,13 +296,12 @@ def main():
     open(os.path.join(ART, 'TORNADO_CARD.prt'), 'wb').write(new)
 
     art_from(MISSILE_TEMPLATE, 'TORNADO_MISSILE.prt', tornado_prt)
-    art_from(SWIRL_SRC, 'SR_TORNADO_SWIRL4.dds', lambda b: b)
     # Push Wave: the wave brighter and stronger, a wind impact on every unit it hits
     art_from(PUSHWAVE_TEMPLATE, 'SR_PUSH_WAVE.prt',
-             lambda b: recolour_prt(b, PUSH_TINT, 3.0, PUSH_LIGHT, alpha_gain=2.5))
+             lambda b: recolour_prt(b, PUSH_TINT, 1.7, PUSH_LIGHT, alpha_gain=1.4))
     art_from(PUSHHIT_TEMPLATE, 'SR_PUSH_UNIT_HIT.prt',
              lambda b: recolour_prt(b, PUSH_TINT, 2.6, PUSH_LIGHT))
-    for old in ('AIR_TORNADO.DDS',):
+    for old in ('AIR_TORNADO.DDS', 'SR_TORNADO_SWIRL4.dds'):
         if os.path.exists(os.path.join(ART, old)):
             os.remove(os.path.join(ART, old))
     for n in sorted(os.listdir(ART)):

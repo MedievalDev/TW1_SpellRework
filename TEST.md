@@ -67,7 +67,7 @@ Torch in the left hand, Burn skill 3 or more, fight a bandit.
 
 Cast Tornado at a group of 3-4 enemies some metres away.
 
-- At the target a blue-white cloud with a vortex symbol on the ground for 4 s;
+- At the target a spinning blue-white whirlwind column for 4 s;
   enemies in it take lightning hits about once a second (lightning effect on
   them).
 - Enemies in it cannot walk out while it lasts; some stand stunned (more with
@@ -96,5 +96,5 @@ slower (the campaign tick now runs every second).
 | 3, 4 | does the damage ring on the caster hurt enemies? do the Dynamics effects show? |
 | 3, 5 | does the burning damage-over-time tick run? |
 | 6 | does the engine call the script for every unit the Tornado hits (hold + stun)? |
-| 6 | does the recoloured effect look like a storm? |
+| 6 | does the whirlwind look right in size and colour (blue-white, not sand or green)? |
 | 7 | does the Push Wave play the impact on every unit it hits? |

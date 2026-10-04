@@ -115,7 +115,7 @@ Other rules:
 | All numbers and the spell logic | `rework\SpellRework.ech` (included by RPGCompute before `Unit.ech`) |
 | Burn damage over time (1 s tick, attributes `SRBN` seconds left, `SRBD` HP per second) | `rework\SpellReworkCampaign.ech`, called from the campaign's `state Nothing`, which now runs every second (its own cleanup stays every 3 s) |
 | Hooks in the original scripts | `patch_phase1.py`, `patch_phase2.py` (line-based via `patchlib.py`) |
-| PAR: Push Wave cue and look, Dynamics `SR_BURNING` (Fire Shield look without its force field) and `SR_PUSH_HIT`, Missile `MIS_TORNADO` (Poison Cloud area type), card `MAGIC_TORNADO` | `data.py` |
+| PAR: Push Wave cue and look, Dynamics `SR_BURNING` (Fire Shield look without its force field) and `SR_PUSH_HIT`, Missile `MIS_TORNADO` (Poison Cloud area type, sand devil look), card `MAGIC_TORNADO` | `data.py` |
 | Texts (German and English) | `texts.py` -> `Language\ZZ_SpellRework.lan` (overlay, wins over the original texts) |
 | Card art, card and effect particles (Tornado, Push Wave) | `make_art.py` -> `art\` |
 
@@ -136,23 +136,36 @@ Other rules:
   `Textures\Interface\InventoryTextures\Particles\Magic\TORNADO_CARD.DDS`
   (96x128 DXT1, 8 mips, named after the card .prt).
 - `TORNADO_CARD.prt` = `LIGHTING_CARD.prt` with the texture path swapped.
-- `TORNADO_MISSILE.prt` = the Poison Cloud effect recoloured pale blue
-  (particle colour curves and light colour, format from
-  `wicked\tw1probe\research\prtparse.py`), its ground symbol swapped for
-  the `SWIRL_4` vortex (copied as `SR_TORNADO_SWIRL4.dds`). Hits show the
-  Lightning Storm hit effect.
-- Every swapped path has the same length as the old one, so nothing else in
-  the .prt moves.
+- `TORNADO_MISSILE.prt` = the desert sand devil
+  (`Particles\Enviroment\Desert\SANDDEVIL2.prt`: a spinning column, narrow
+  at the ground, wide at the top) recoloured pale storm blue. Found by
+  scanning all retail effects for spinning emitters and checked in the
+  SDK's ParticleEdit (`tools\pe_views.py`). Hits show the Lightning Storm
+  hit effect.
+- The swapped texture path in the card .prt has the same length as the old
+  one, so nothing else in the file moves.
+
+### Recolouring a .prt
+
+Every curve of a .prt also exists as a **baked per-tick table** in the
+tail of its block (`u32 n, u32 0, n x f32, u8 isConst, f32 const`); the
+game reads these. ParticleEdit's preview draws from the curves, and the
+tool only rebakes curves edited inside it - saving an untouched file
+writes the same bytes. `make_art.py` therefore changes both the curve keys
+and their tables (colour 12-17, alpha 18-19, light 22-27) and asserts that
+they agree. (v0.1.0 changed only the curves; in the game the Tornado would
+have stayed green.)
 
 ### Push Wave look
 
 The original wave is mostly distortion rings (refraction, hardly visible)
 plus a dim blue layer, which is why it looks weak. `SR_PUSH_WAVE.prt` is
-`PUSH_WAVE_HIT.prt` with its coloured layers white-blue, 3x brighter and
-2.5x more opaque (the distortion rings unchanged); `MIS_PUSH_WAVE` points
-at it. Every unit the wave hits gets `SR_PUSH_HIT`, the Magic Hammer impact
+`PUSH_WAVE_HIT.prt` with its coloured layers white-blue, 1.7x brighter and
+1.4x more opaque (the distortion rings unchanged; checked against the
+original in ParticleEdit, `tools\pe_burst.py`); `MIS_PUSH_WAVE` points at
+it. Every unit the wave hits gets `SR_PUSH_HIT`, the Magic Hammer impact
 recoloured white-blue (`SR_PUSH_UNIT_HIT.prt`, its thump sound kept).
-Only curve values change in these files, never their layout.
+Only values change in these files, never their layout.
 
 ## Build
 
@@ -176,7 +189,8 @@ replaced files are kept in `guids.json` (new GUIDs, retail metadata
 otherwise; the engine keys scripts by GUID).
 
 Tools: `pardump.py NAME` prints PAR entries with field names,
-`tools\prtrefs.py` lists the files a .prt uses, `tools\comfy_gen.py` makes
+`tools\prtrefs.py` lists the files a .prt uses, `tools\pe_views.py`,
+`tools\pe_burst.py` and `tools\pe_preview.py` take pictures from ParticleEdit's preview, `tools\comfy_gen.py` makes
 pictures with the local ComfyUI, `tools\exedis.py` is a small disassembler
 helper for TwoWorlds.exe.
 
@@ -190,8 +204,9 @@ helper for TwoWorlds.exe.
    (Tornado) hits? Freezing Wave is a different missile type.
 4. Does the novas' call come at the cast (caster = target for Overpower and
    Concentration)?
-5. Tornado flags were copied from Poison Cloud (2825); whether the recoloured
-   effect looks like a storm and not like green poison is only visible in game.
+5. Tornado flags were copied from Poison Cloud (2825). The sand devil was
+   made as a landscape effect; how big it looks on a 6 m spell area is only
+   visible in game.
 6. The campaign tick now runs every second; check that nothing feels slower.
 7. Does the Push Wave missile (type 3) play its `$objectExplosionID` on the
    units it hits? Retail uses that field only on type-1 and area missiles.

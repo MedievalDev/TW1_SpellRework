@@ -33,7 +33,6 @@ PAR_INNER = SEP.join(['Parameters', 'TwoWorlds.par'])
 LAN_INNER = SEP.join(['Language', 'ZZ_SpellRework.lan'])
 CARD_PRT = SEP.join(['Particles', 'Magic', 'TORNADO_CARD.prt'])
 CARD_TEX = SEP.join(['Textures', 'Particles', 'Cards', 'AIR_TORNADO1.DDS'])
-SWIRL_TEX = SEP.join(['Textures', 'Particles', 'Symbols', 'SR_TORNADO_SWIRL4.dds'])
 CARD_ICON = SEP.join(['Textures', 'Interface', 'InventoryTextures', 'Particles', 'Magic', 'TORNADO_CARD.DDS'])
 
 # Tornado missile: share of the magic damage per pulse, 4 pulses in 4 s
@@ -134,7 +133,7 @@ def lan_entry(lang):
 def art_entries():
     out = []
     for inner, name in ((CARD_PRT, 'TORNADO_CARD.prt'), (CARD_TEX, 'AIR_TORNADO1.DDS'),
-                        (CARD_ICON, 'TORNADO_CARD.DDS'), (SWIRL_TEX, 'SR_TORNADO_SWIRL4.dds'),
+                        (CARD_ICON, 'TORNADO_CARD.DDS'),
                         (SEP.join(['Particles', 'Magic', 'TORNADO_MISSILE.prt']), 'TORNADO_MISSILE.prt'),
                         (SEP.join(['Particles', 'Magic', 'SR_PUSH_WAVE.prt']), 'SR_PUSH_WAVE.prt'),
                         (SEP.join(['Particles', 'Magic', 'SR_PUSH_UNIT_HIT.prt']), 'SR_PUSH_UNIT_HIT.prt')):

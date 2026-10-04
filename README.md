@@ -12,7 +12,7 @@ adds a new Air spell: **Tornado**. Based on Vince's spell list
 
 ## Download and install
 
-1. Download from the [latest release](../../releases/latest):
+1. Download from the [releases](../../releases):
    - `SpellRework.wd` - English texts
    - `SpellRework_DE.wd` - German texts
 

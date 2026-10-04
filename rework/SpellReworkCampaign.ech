@@ -1,0 +1,50 @@
+// SpellRework (Two Worlds 1 mod): burning, damage over time.
+// RPGCompute (SpellRework.ech) marks a burning unit with two attributes;
+// this tick, run once a second from the campaign's state Nothing, takes the
+// HP and counts the seconds down. Burning never kills: it stops at 1 HP
+// (a script kill would give no experience and no kill credit).
+// The names must match SpellRework.ech.
+
+#define SR_ATTR_BURN_SECS       "SRBN"
+#define SR_ATTR_BURN_DAMAGE     "SRBD"
+#define SR_BURN_TICK_RANGE      M2A(60)
+
+function void SR_BurnUnit(unit uUnit)
+{
+    int nLeft, nDamage;
+    if ((uUnit == null) || !uUnit.IsLive()) return;
+    nLeft = 0;
+    if (!uUnit.GetAttribute(SR_ATTR_BURN_SECS, nLeft)) return;
+    if (nLeft <= 0) return;
+    uUnit.SetAttribute(SR_ATTR_BURN_SECS, nLeft - 1);
+    nDamage = 0;
+    uUnit.GetAttribute(SR_ATTR_BURN_DAMAGE, nDamage);
+    if (nDamage < 1) nDamage = 1;
+    if (uUnit.GetHP() - nDamage < 1) nDamage = uUnit.GetHP() - 1;
+    if (nDamage > 0) uUnit.SetHP(uUnit.GetHP() - nDamage);
+}
+
+function void SR_BurnTick()
+{
+    int i, nPlayer, nCnt;
+    int anParties[];
+    unit uHero, uUnit;
+    mission pMission;
+
+    for (i = 0; i <= 63; i++) anParties.Add(i);
+    for (nPlayer = 0; nPlayer < 8; nPlayer++)
+    {
+        uHero = GetCampaign().GetPlayerHeroUnit(nPlayer);
+        if (uHero == null) continue;
+        pMission = uHero.GetMission();
+        if (pMission == null) continue;
+        SR_BurnUnit(uHero);
+        nCnt = pMission.SearchUnitsInArea(uHero.GetLocationX(), uHero.GetLocationY(), SR_BURN_TICK_RANGE, anParties);
+        for (i = 0; i < nCnt; i++)
+        {
+            uUnit = pMission.GetSearchUnitInArea(i);
+            if ((uUnit != null) && !uUnit.IsHeroUnit()) SR_BurnUnit(uUnit);
+        }
+        pMission.ClearSearchUnitsInAreaArray();
+    }
+}

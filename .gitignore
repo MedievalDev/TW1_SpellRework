@@ -1,0 +1,11 @@
+# SDK scripts (not ours) and the build copy
+base/
+src/
+# build output: goes into the GitHub release
+out/
+# files extracted from the game archives, previews, logs
+ref/*
+!ref/tornado.png
+art/
+__pycache__/
+*.pyc

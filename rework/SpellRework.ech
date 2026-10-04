@@ -1,0 +1,271 @@
+// SpellRework (Two Worlds 1 mod): the reworked spells and the Burn skill.
+// Values from Vince's list (Discord, 01.10.2026). Times are given in seconds,
+// the game counts 30 ticks per second. Distances: 64 units = 1 m (M2A).
+//
+// Included by RPGCompute.ec before Unit.ech, so Unit.ech, Magic.ech and
+// Magic2.ech can call everything here. The campaign script carries the
+// matching damage-over-time tick (SpellReworkCampaign.ech): RPGCompute has
+// no timer of its own.
+
+// ----------------------------------------------------------------- tuning
+
+#define SR_MAX_CARDS            20
+
+#define SR_NOVA_RANGE           M2A(6)          // fire and lightning nova radius
+#define SR_FIRENOVA_TICKS       90              // fire ring stays 3 s around the caster
+#define SR_FIRENOVA_PULSE       30              // and burns every second
+#define SR_LIGHTNOVA_TICKS      16              // lightning ring: one pulse
+#define SR_LIGHTNOVA_PULSE      15
+#define SR_SHOCK_TICKS          90              // shock stun 3 s
+
+#define SR_BURN_PERCENT_PER_SEC 2               // burning: 2 % of max HP per second (never kills)
+#define SR_BURN_STRIKE_BONUS    20              // +20 % strike damage per Burn level on a burning enemy
+#define SR_BURN_MIN_NOVA_SECS   3               // fire nova burns at least 3 s
+
+#define SR_TORNADO_STUN_BASE    25              // tornado stun chance 25 % + 7 % per Stun level
+#define SR_TORNADO_STUN_STEP    7
+#define SR_TORNADO_STUN_MAX     95
+#define SR_TORNADO_TICKS        90              // held and stunned 3 s ...
+#define SR_TORNADO_TICKS_STEP   7               // ... +0.25 s per further card
+#define SR_TORNADO_TICKS_MAX    180
+
+#define SR_ATTR_BURN_SECS       "SRBN"          // seconds of burning left (campaign tick counts down)
+#define SR_ATTR_BURN_DAMAGE     "SRBD"          // HP lost per second
+#define SR_BURN_EFFECT          "SR_BURNING"    // Dynamics entry: flames on a burning unit (PAR of the mod)
+#define SR_FIRENOVA_EFFECT      "MISSILE_FIREWAVE"
+#define SR_LIGHTNOVA_EFFECT     "LIGHTING_HIT"
+#define SR_STUN_EFFECT          "STATE_STUNED"
+
+// ------------------------------------------------------------------ cards
+
+// cards counted for the rework: at least 1, at most SR_MAX_CARDS
+function int SR_Cards(int nCardCnt)
+{
+    if (nCardCnt < 1) return 1;
+    if (nCardCnt > SR_MAX_CARDS) return SR_MAX_CARDS;
+    return nCardCnt;
+}
+
+// "5-6 more mana" per card: half steps rounded down (5, 6, 5, 6, ...)
+function int SR_StepHalf(int nSteps, int nTwiceStep)
+{
+    return (nSteps * nTwiceStep) / 2;
+}
+
+// Overpower and Concentration: +10 % damage per card, the school skill does not count
+function int SR_BoostDamagePercent(int nCardCnt)
+{
+    return 10 * SR_Cards(nCardCnt);
+}
+
+function int SR_OverpowerSeconds(int nCardCnt)     { return 78 + 3 * (SR_Cards(nCardCnt) - 1); }
+function int SR_ConcentrationSeconds(int nCardCnt) { return 126 + 6 * (SR_Cards(nCardCnt) - 1); }
+function int SR_BlessSeconds(int nCardCnt)         { return 78 + 3 * (SR_Cards(nCardCnt) - 1); }
+function int SR_BlessPoints(int nCardCnt)          { return 18 + 3 * (SR_Cards(nCardCnt) - 1); }
+
+function int SR_OverpowerMana(int nCardCnt)        { return 120 + SR_StepHalf(SR_Cards(nCardCnt) - 1, 11); }
+function int SR_ConcentrationMana(int nCardCnt)    { return 271 + SR_StepHalf(SR_Cards(nCardCnt) - 1, 29); }
+function int SR_BlessMana(int nCardCnt)            { return 120 + SR_StepHalf(SR_Cards(nCardCnt) - 1, 11); }
+
+function int SR_FireNovaDamage(int nCardCnt)       { return 10 + 5 * SR_Cards(nCardCnt); }   // per pulse
+function int SR_LightNovaDamage(int nCardCnt)      { return 30 + 10 * SR_Cards(nCardCnt); }  // one pulse
+
+// ----------------------------------------------------------------- skills
+
+function int SR_Skill(unit pUnit, int nSkill)
+{
+    int nVal;
+    if ((pUnit == null) || !pUnit.IsUnit()) return 0;
+    nVal = pUnit.GetUnitValues().GetSkill(nSkill);
+    if (nVal < 0) return 0;
+    return nVal;
+}
+
+// 50 % rising to 75 % with the caster's air magic skill (school skill goes to 15):
+// knockdown by Push / Push Wave and the shock of the lightning nova
+function int SR_AirChance(unit pCaster)
+{
+    int nSkill;
+    nSkill = SR_Skill(pCaster, eSkillAirMagic);
+    if (nSkill > 15) nSkill = 15;
+    return 50 + (25 * nSkill) / 15;
+}
+
+function int SR_PushKnockdownChance(unit pCaster)
+{
+    return SR_AirChance(pCaster);
+}
+
+function int SR_TornadoStunChance(unit pCaster)
+{
+    int nChance;
+    nChance = SR_TORNADO_STUN_BASE + SR_TORNADO_STUN_STEP * SR_Skill(pCaster, eSkillStun);
+    if (nChance > SR_TORNADO_STUN_MAX) nChance = SR_TORNADO_STUN_MAX;
+    return nChance;
+}
+
+function int SR_TornadoTicks(int nCardCnt)
+{
+    int nTicks;
+    nTicks = SR_TORNADO_TICKS + SR_TORNADO_TICKS_STEP * (SR_Cards(nCardCnt) - 1);
+    if (nTicks > SR_TORNADO_TICKS_MAX) nTicks = SR_TORNADO_TICKS_MAX;
+    return nTicks;
+}
+
+// Burn skill: +20 % per level on each strike against a burning enemy (level 10 = +200 %)
+function int SR_BurnStrikeBonus(unit pAttacker)
+{
+    int nLevel;
+    nLevel = SR_Skill(pAttacker, eSkillBurn);
+    if (nLevel > 10) nLevel = 10;
+    return SR_BURN_STRIKE_BONUS * nLevel;
+}
+
+// ---------------------------------------------------------------- burning
+
+function int SR_IsBurning(unit pUnit)
+{
+    int nLeft;
+    if ((pUnit == null) || !pUnit.IsUnit()) return false;
+    nLeft = 0;
+    if (!pUnit.GetAttribute(SR_ATTR_BURN_SECS, nLeft)) return false;
+    if (nLeft > 0) return true;
+    return false;
+}
+
+// Sets pTarget on fire for nSeconds (1-10). The campaign tick takes the HP
+// once a second; the flames are a timed effect on the unit. A unit that
+// already burns keeps the longer of the two times.
+function void SR_SetBurning(unit pTarget, int nSeconds)
+{
+    int nLeft, nDamage;
+    PotionValues ptVal;
+
+    if ((pTarget == null) || !pTarget.IsUnit() || !pTarget.IsLive()) return;
+    if (nSeconds < 1) nSeconds = 1;
+    if (nSeconds > 10) nSeconds = 10;
+    nLeft = 0;
+    pTarget.GetAttribute(SR_ATTR_BURN_SECS, nLeft);
+    if (nLeft >= nSeconds) return;
+
+    nDamage = pTarget.GetMaxHP() * SR_BURN_PERCENT_PER_SEC / 100;
+    if (nDamage < 1) nDamage = 1;
+    pTarget.SetAttribute(SR_ATTR_BURN_SECS, nSeconds);
+    pTarget.SetAttribute(SR_ATTR_BURN_DAMAGE, nDamage);
+
+    // flames for the time that is new (an older flame effect keeps running)
+    ptVal = pTarget.AddPotionValues(SR_BURN_EFFECT);
+    if (ptVal != null)
+    {
+        ptVal.SetPotionTicks((nSeconds - nLeft) * 30 + 15);
+    }
+    pTarget.UpdateChangedUnitValues();
+}
+
+// --------------------------------------------------------------------- stun
+
+function void SR_Stun(unit pTarget, int nTicks)
+{
+    PotionValues ptVal;
+    if ((pTarget == null) || !pTarget.IsUnit() || !pTarget.IsLive()) return;
+    ptVal = pTarget.AddPotionValues(SR_STUN_EFFECT);
+    if (ptVal != null)
+    {
+        ptVal.SetPotionFlags(ePotionStun);
+        ptVal.SetPotionTicks(nTicks);
+    }
+    pTarget.UpdateChangedUnitValues();
+}
+
+// ------------------------------------------------------------------ novas
+
+// damage ring around the caster, the same mechanism as fire and ice shield:
+// the engine applies armour, resistances and kill credit
+function void SR_DamageRing(unit pCaster, string strEffect, int nDamageType, int nDamage, int nTicks, int nPulse)
+{
+    int nIndex;
+    PotionValues ptVal;
+
+    ptVal = pCaster.AddPotionValues(strEffect);
+    if (ptVal == null) return;
+    ptVal.SetDamage(nDamageType, nDamage);
+    for (nIndex = 0; nIndex < eTargetTypeModifiersCnt; nIndex++)
+    {
+        ptVal.SetTargetTypeModifier(nIndex, 100);
+    }
+    ptVal.SetDamageRangeA(SR_NOVA_RANGE);
+    ptVal.SetDamageTicks(nPulse);
+    ptVal.SetDamagePartiesType(ePartiesTypeEnemy);
+    ptVal.SetPotionTicks(nTicks);
+    pCaster.UpdateChangedUnitValues();
+}
+
+// Overpower, second effect: a fire nova around the caster. Enemies in the
+// radius take fire damage for 3 s and burn (Burn skill effect).
+function void SR_FireNova(unit pCaster, int nCardCnt)
+{
+    int i, nCnt, nSeconds;
+    unit uTarget;
+
+    SR_DamageRing(pCaster, SR_FIRENOVA_EFFECT, eDamageFire, SR_FireNovaDamage(nCardCnt), SR_FIRENOVA_TICKS, SR_FIRENOVA_PULSE);
+
+    nSeconds = SR_Skill(pCaster, eSkillBurn);
+    if (nSeconds < SR_BURN_MIN_NOVA_SECS) nSeconds = SR_BURN_MIN_NOVA_SECS;
+
+    pCaster.SearchUnits(SR_NOVA_RANGE, pCaster.GetEnemiesParties());
+    nCnt = pCaster.GetSearchUnitsCount();
+    for (i = 0; i < nCnt; i++)
+    {
+        uTarget = pCaster.GetSearchUnit(i);
+        if ((uTarget != null) && uTarget.IsUnit() && uTarget.IsLive() && (uTarget != pCaster))
+        {
+            SR_SetBurning(uTarget, nSeconds);
+        }
+    }
+    pCaster.ClearSearchUnitsArray();
+}
+
+// Concentration, second effect: a lightning nova around the caster. Enemies
+// in the radius take lightning damage and are stunned for 3 s with 50-75 %
+// (air magic skill). Its own shock, not the Stun skill.
+function void SR_LightningNova(unit pCaster, int nCardCnt)
+{
+    int i, nCnt, nChance;
+    unit uTarget;
+
+    SR_DamageRing(pCaster, SR_LIGHTNOVA_EFFECT, eDamageElectric, SR_LightNovaDamage(nCardCnt), SR_LIGHTNOVA_TICKS, SR_LIGHTNOVA_PULSE);
+
+    nChance = SR_AirChance(pCaster);
+    pCaster.SearchUnits(SR_NOVA_RANGE, pCaster.GetEnemiesParties());
+    nCnt = pCaster.GetSearchUnitsCount();
+    for (i = 0; i < nCnt; i++)
+    {
+        uTarget = pCaster.GetSearchUnit(i);
+        if ((uTarget != null) && uTarget.IsUnit() && uTarget.IsLive() && (uTarget != pCaster) && (Rand(100) < nChance))
+        {
+            SR_Stun(uTarget, SR_SHOCK_TICKS);
+        }
+    }
+    pCaster.ClearSearchUnitsArray();
+}
+
+// Tornado, on every enemy its missile hits (the engine calls
+// MakeMagicGenericOnUnit per target, like Freezing Wave): caught in the
+// vortex (cannot move) and stunned with a chance from the caster's Stun skill.
+function void SR_TornadoOnTarget(unit pCaster, unit pTarget, int nCardCnt)
+{
+    int nTicks;
+    if ((pTarget == null) || !pTarget.IsUnit() || !pTarget.IsLive() || (pTarget == pCaster)) return;
+    if ((pCaster != null) && !pCaster.IsEnemy(pTarget)) return;
+    nTicks = SR_TornadoTicks(nCardCnt);
+    // caught in the vortex: cannot walk away while it lasts (refreshed by every pulse)
+    if (!pTarget.IsHeroUnit() || (pCaster == null) || !pCaster.IsHeroUnit())
+    {
+        pTarget.SetStopMovingTicks(nTicks, true);
+    }
+    // one stun roll per unit and tornado: no new roll while the unit is stunned
+    if ((pTarget.FindPotionWithFlags(ePotionStun) < 0) && (Rand(100) < SR_TornadoStunChance(pCaster)))
+    {
+        SR_Stun(pTarget, nTicks);
+    }
+}
